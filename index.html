@@ -32,10 +32,11 @@
   .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #666; }
   .legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
-  .table-card { background: #1a1a1a; border: 0.5px solid #222; border-radius: 12px; padding: 1.25rem; }
+  .table-card { background: #1a1a1a; border: 0.5px solid #222; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; }
   .ranking-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .ranking-table tr { border-bottom: 0.5px solid #222; }
   .ranking-table tr:last-child { border-bottom: none; }
+  .ranking-table th { padding: 10px 4px; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; font-weight: 500; }
   .ranking-table td { padding: 9px 4px; color: #e8e8e8; vertical-align: middle; }
   .ranking-table td:first-child { color: #444; width: 22px; font-size: 12px; }
   .ranking-table td:last-child { text-align: right; font-weight: 500; white-space: nowrap; }
@@ -44,6 +45,14 @@
   .pct-label { font-size: 11px; color: #555; font-weight: 400; }
   .loading { text-align: center; padding: 4rem 0; color: #444; font-size: 14px; }
   .error-msg { background: #2a1010; color: #E24B4A; border: 0.5px solid #3a1515; border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-bottom: 1rem; }
+  
+  /* Estilos específicos para las etiquetas del registro individualizado */
+  .badge-user { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; display: inline-block; text-transform: capitalize; }
+  .badge-lucas { background: rgba(55, 138, 221, 0.15); color: #378ADD; }
+  .badge-mariana { background: rgba(212, 83, 126, 0.15); color: #D4537E; }
+  .badge-desconocido { background: #222; color: #888; }
+  .cat-tag { background: #222; padding: 3px 8px; border-radius: 4px; font-size: 11px; color: #aaa; white-space: nowrap; }
+
   @media (max-width: 540px) { .charts { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
@@ -74,9 +83,18 @@
         <div style="position:relative; height:200px;"><canvas id="barChart"></canvas></div>
       </div>
     </div>
+    
     <div class="table-card">
       <p class="chart-title">Ranking de categorías</p>
       <table class="ranking-table" id="rankingTable"></table>
+    </div>
+
+    <div class="table-card">
+      <p class="chart-title">Registro de gastos individualizados</p>
+      <div style="overflow-x: auto;">
+        <table class="ranking-table" id="logTable" style="width: 100%; min-width: 600px;">
+          </table>
+      </div>
     </div>
   </div>
 </div>
@@ -85,7 +103,6 @@
 const MESES = [
   { label: 'Mayo 2026',  url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTSR-jEHWGJNTU5Wk2HOm6U5_pQkHudAuzgL46QYnVg5WNv-2K9H8hDsNVGUtFifICuhdcCzBWich3V/pub?gid=768994311&single=true&output=csv' },
   { label: 'Junio 2026', url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTSR-jEHWGJNTU5Wk2HOm6U5_pQkHudAuzgL46QYnVg5WNv-2K9H8hDsNVGUtFifICuhdcCzBWich3V/pub?gid=1978138079&single=true&output=csv' }
-  // Para agregar un mes: { label: 'Julio 2026', url: 'URL_CSV_AQUI' }
 ];
 
 const PALETTE = ['#378ADD','#1D9E75','#EF9F27','#7F77DD','#D4537E','#D85A30','#639922','#888780','#185FA5','#5DCAA5','#F09595','#B4B2A9'];
@@ -100,15 +117,11 @@ function fmt(n) {
 function parseMonto(s) {
   if (!s) return 0;
   let str = s.toString().trim();
-  // Quitar símbolo $ y espacios
   str = str.replace(/\$/g, '').replace(/\s/g, '');
-  // Formato argentino: puntos = miles, coma = decimal → "1.470.454,96"
-  // Detectar si tiene coma como separador decimal
   const tieneComaDecimal = /,\d{1,2}$/.test(str);
   if (tieneComaDecimal) {
     str = str.replace(/\./g, '').replace(',', '.');
   } else {
-    // Formato con punto decimal → "1470.96"
     str = str.replace(/,/g, '');
   }
   return parseFloat(str) || 0;
@@ -164,6 +177,7 @@ function buildDashboard(rows) {
   const colDetalle = cols[1];
   const colCategoria = cols[2];
   const colMonto = cols[3];
+  const colQuien = cols[4]; // Mapeo de la columna "Quién?"
 
   let ingresosLucas = 0, ingresosMari = 0;
   const datos = [];
@@ -172,13 +186,15 @@ function buildDashboard(rows) {
     const fecha = r[colFecha] ? r[colFecha].trim() : '';
     const cat = r[colCategoria] ? r[colCategoria].trim() : '';
     const monto = parseMonto(r[colMonto]);
-    const detalle = (r[colDetalle] || '').trim().toLowerCase();
+    const detOriginal = r[colDetalle] ? r[colDetalle].trim() : '';
+    const detalleLower = detOriginal.toLowerCase();
+    const quien = r[colQuien] ? r[colQuien].trim() : 'Desconocido';
 
-    if (detalle.includes('ingresos lucas')) { ingresosLucas = monto; return; }
-    if (detalle.includes('ingresos mariana')) { ingresosMari = monto; return; }
+    if (detalleLower.includes('ingres. lucas')) { ingresosLucas = monto; return; }
+    if (detalleLower.includes('ingres. mariana')) { ingresosMari = monto; return; }
     if (!fecha || !cat || monto <= 0) return;
 
-    datos.push({ fecha, categoria: cat, monto });
+    datos.push({ fecha, detalle: detOriginal, categoria: cat, monto, quien });
   });
 
   if (ingresosLucas === 0) ingresosLucas = 3600000;
@@ -206,8 +222,8 @@ function buildDashboard(rows) {
   document.getElementById('dashSub').textContent = `${datos.length} movimientos · ${MESES[mesActivo].label}`;
 
   document.getElementById('metricsBox').innerHTML = `
-    <div class="metric"><p class="metric-label">Ingresos Lucas</p><p class="metric-value">${fmt(ingresosLucas)}</p></div>
-    <div class="metric"><p class="metric-label">Ingresos Mariana</p><p class="metric-value">${fmt(ingresosMari)}</p></div>
+    <div class="metric"><p class="metric-label">Ingres. Lucas</p><p class="metric-value">${fmt(ingresosLucas)}</p></div>
+    <div class="metric"><p class="metric-label">Ingres. Mariana</p><p class="metric-value">${fmt(ingresosMari)}</p></div>
     <div class="metric"><p class="metric-label">Total ingresos</p><p class="metric-value">${fmt(totalIngresos)}</p></div>
     <div class="metric"><p class="metric-label">Total gastos</p><p class="metric-value danger">${fmt(totalGastos)}</p></div>
     <div class="metric"><p class="metric-label">Resto</p><p class="metric-value success">${fmt(resto)}</p></div>
@@ -254,6 +270,7 @@ function buildDashboard(rows) {
     }
   });
 
+  // Renderizar Ranking de Categorías
   document.getElementById('rankingTable').innerHTML = categorias.map((c, i) => {
     const pct = ((c.monto / totalGastos) * 100).toFixed(1);
     return `<tr>
@@ -262,6 +279,41 @@ function buildDashboard(rows) {
       <td>${fmt(c.monto)}<br><span class="pct-label">${pct}%</span></td>
     </tr>`;
   }).join('');
+
+  // Ordenar los gastos individualizados de forma descendente (los más nuevos primero)
+  const datosOrdenados = [...datos].sort((a, b) => {
+    const da = parseDate(a.fecha), db = parseDate(b.fecha);
+    return (!da || !db) ? 0 : db - da;
+  });
+
+  // Renderizar Registro de Gastos Detallados
+  document.getElementById('logTable').innerHTML = `
+    <thead>
+      <tr>
+        <th style="width: 15%;">Fecha</th>
+        <th style="width: 35%;">Detalle</th>
+        <th style="width: 25%;">Categoría</th>
+        <th style="width: 15%; text-align: right;">Monto</th>
+        <th style="width: 10%; text-align: center;">Quién</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${datosOrdenados.map(r => {
+        let badgeClass = 'badge-desconocido';
+        const qLower = r.quien.toLowerCase();
+        if (qLower === 'lucas') badgeClass = 'badge-lucas';
+        if (qLower === 'mariana' || qLower === 'mari') badgeClass = 'badge-mariana';
+        
+        return `<tr>
+          <td style="color: #666; font-size: 12px;">${r.fecha}</td>
+          <td style="font-weight: 500;">${r.detalle}</td>
+          <td><span class="cat-tag">${r.categoria}</span></td>
+          <td style="text-align: right; font-weight: 500;">${fmt(r.monto)}</td>
+          <td style="text-align: center;"><span class="badge-user ${badgeClass}">${r.quien}</span></td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  `;
 
   document.getElementById('loadingBox').style.display = 'none';
   document.getElementById('content').style.display = 'block';

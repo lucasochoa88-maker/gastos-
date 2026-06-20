@@ -111,7 +111,10 @@ let mesActivo = MESES.length - 1;
 let donutInst = null, barInst = null;
 
 function fmt(n) {
-  return '$' + Math.round(n).toLocaleString('es-AR');
+  return '$' + n.toLocaleString('es-AR', { 
+    minimumFractionDigits: 2, 
+    maximumFractionDigits: 2 
+  });
 }
 
 function parseMonto(s) {
